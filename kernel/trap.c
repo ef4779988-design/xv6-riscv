@@ -34,64 +34,72 @@ trapinithart(void)
 // called from, and returns to, trampoline.S
 // return value is user satp for trampoline.S to switch to.
 //
-uint64
+
+void
 usertrap(void)
 {
   int which_dev = 0;
 
-  if ((r_sstatus() & SSTATUS_SPP) != 0)
-    panic("usertrap: not from user mode");
-
-  // send interrupts and exceptions to kerneltrap(),
-  // since we're now in the kernel.
-  w_stvec((uint64)kernelvec); //DOC: kernelvec
-
+  uint64 scause = r_scause();
   struct proc *p = myproc();
 
-  // save user program counter.
-  p->trapframe->epc = r_sepc();
+  // 1. Check if the trap is a page fault (Load page fault = 13, Store page fault = 15)
+  if(scause == 13 || scause == 15){
+    uint64 va = r_stval(); // Faulting virtual address
 
-  if (r_scause() == 8) {
-    // system call
+    if(va < p->sz && va >= 0 && va >= PGSIZE) { // Guard page ya low memory check
+      // Allocate physical page on demand
+      char *mem = kalloc();
+      if(mem == 0){
+        // Out of memory
+        p->killed = 1;
+      } else {
+        memset(mem, 0, PGSIZE);
+        uint64 mem_aligned = PGROUNDDOWN(va);
+        if(mappages(p->pagetable, mem_aligned, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_U) != 0){
+          kfree(mem);
+          p->killed = 1;
+        }
+      }
+    } else {
+      printf("usertrap(): unexpected scause %p pid=%d va=%p\n", scause, p->pid, va);
+      p->killed = 1;
+    }
+  } 
+  // 2. Check if the trap is from a system call (scause == 8)
+  else if(r_scause() == 8){
+    // If killed, do not run
+    if(killed(p))
+      exit(-1);
 
-    if (killed(p))
-      kexit(-1);
-
-    // sepc points to the ecall instruction,
-    // but we want to return to the next instruction.
+    // sepc points to the syscall instruction, so increment it to skip over it
     p->trapframe->epc += 4;
 
-    // an interrupt will change sepc, scause, and sstatus,
-    // so enable only now that we're done with those registers.
+    // an interrupt will change sstatus &c registers, so don't enable until
+    // we are done with those registers.
     intr_on();
 
     syscall();
-  } else if ((which_dev = devintr()) != 0) {
-    // ok
-  } else if ((r_scause() == 15 || r_scause() == 13) &&
-             vmfault(p->pagetable, p->sz, r_stval(),
-                     (r_scause() == 13) ? 1 : 0) != 0) {
-    // page fault on lazily-allocated page
-  } else {
-    printk("usertrap(): unexpected scause 0x%lx pid=%d\n", r_scause(), p->pid);
-    printk("            sepc=0x%lx stval=0x%lx\n", r_sepc(), r_stval());
-    setkilled(p);
+  } 
+  // 3. Check if it's a device interrupt (timer, UART, etc.)
+  else if((which_dev = devintr()) != 0){
+    // ok, handled by devintr()
+  } 
+  // 4. Any other unexpected trap/exception
+  else {
+    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+    p->killed = 1;
   }
 
-  if (killed(p))
-    kexit(-1);
+  if(killed(p))
+    exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2)
+  if(which_dev == 2)
     yield();
 
-  prepare_return();
-
-  // the user page table to switch to, for trampoline.S
-  uint64 satp = MAKE_SATP(p->pagetable);
-
-  // return to trampoline.S; satp value in a0.
-  return satp;
+  usertrapret();
 }
 
 //

@@ -9,7 +9,7 @@
 #include "fs.h"
 
 /*
- * the kernel's page table.
+- the kernel's page table.
  */
 pagetable_t kernel_pagetable;
 
@@ -98,10 +98,12 @@ kvminithart()
 pte_t *
 walk(pagetable_t pagetable, uint64 va, int alloc)
 {
+  int level;
+
   if (va >= MAXVA)
     panic("walk");
 
-  for (int level = 2; level > 0; level--) {
+  for (level = 2; level > 0; level--) {
     pte_t *pte = &pagetable[PX(level, va)];
     if (*pte & PTE_V) {
       pagetable = (pagetable_t)PTE2PA(*pte);
@@ -124,20 +126,20 @@ walkaddr(pagetable_t pagetable, uint64 va)
   pte_t *pte;
   uint64 pa;
 
-  if (va >= MAXVA)
+  if(va >= MAXVA)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if (pte == 0)
+  if(pte == 0)
     return 0;
-  if ((*pte & PTE_V) == 0)
+  if((*pte & PTE_V) == 0){
     return 0;
-  if ((*pte & PTE_U) == 0)
+  }
+  if((*pte & PTE_U) == 0)
     return 0;
   pa = PTE2PA(*pte);
   return pa;
 }
-
 // Create PTEs for virtual addresses starting at va that refer to
 // physical addresses starting at pa.
 // va and size MUST be page-aligned.
@@ -264,8 +266,9 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 void
 freewalk(pagetable_t pagetable)
 {
+  int i;
   // there are 2^9 = 512 PTEs in a page table.
-  for (int i = 0; i < 512; i++) {
+  for (i = 0; i < 512; i++) {
     pte_t pte = pagetable[i];
     if ((pte & PTE_V) && (pte & (PTE_R | PTE_W | PTE_X)) == 0) {
       // this PTE points to a lower-level page table.

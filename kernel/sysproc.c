@@ -7,6 +7,8 @@
 #include "proc.h"
 #include "vm.h"
 
+int argint(int, int*);
+
 uint64
 sys_exit(void)
 {
@@ -39,28 +41,25 @@ sys_wait(void)
 uint64
 sys_sbrk(void)
 {
-  uint64 addr;
-  int t;
+  int addr;
   int n;
 
-  argint(0, &n);
-  argint(1, &t);
-  addr = myproc()->sz;
+ if(argint(0, &n) < 0)
+    return (uint64)-1;
+  
+  struct proc *p = myproc();
+  addr = p->sz;
 
-  if (t == SBRK_EAGER || n < 0) {
-    if (growproc(n) < 0) {
-      return -1;
-    }
+  // Lazy allocation: Don't allocate physical memory immediately, 
+  // just increase the process size (p->sz).
+  if(n < 0){
+    // Agar memory reduce karni ho (sbrk with negative value)
+    p->sz = uvmdealloc(p->pagetable, p->sz, p->sz + n);
   } else {
-    // Lazily allocate memory for this process: increase its memory
-    // size but don't allocate memory. If the processes uses the
-    // memory, vmfault() will allocate it.
-    if (addr + n < addr)
-      return -1;
-    if (addr + n > TRAPFRAME)
-      return -1;
-    myproc()->sz += n;
+    // Sirf size update karein, kalloc() ki call yahan se hata dein
+    p->sz += n;
   }
+  
   return addr;
 }
 
